@@ -56,24 +56,25 @@ The demo exits non-zero unless both scenarios behave as expected:
 Actual output from the final verification run (2026-10-25):
 
 ```text
-Scenario A: IMPROVED  overall +57.83%
-  cost_usd             1.6505 -> 0.4976 USD   +69.85% [simulated->simulated]
-  energy_kwh           0.2131 -> 0.0793 kWh   +62.77% [simulated->simulated]
-  latency_ms           1.2195 -> 0.7756 ms    +36.41% [simulated->simulated]
-  throughput_samples_s 819.9918 -> 1289.4057  +57.25% [simulated->simulated]
+Scenario A: IMPROVED  overall +58.49%   analysis=gemma (ollama)
+  cost_usd             1.6504 -> 0.4922 USD   +70.17% [simulated->simulated]
+  energy_kwh           0.2131 -> 0.0785 kWh   +63.17% [simulated->simulated]
+  latency_ms           1.2195 -> 0.7667 ms    +37.13% [simulated->simulated]
+  throughput_samples_s 820.0232 -> 1304.2243  +59.05% [simulated->simulated]
   provider launches=1, retries=1, cleanup events=1
 
-Scenario B: REGRESSED  overall -80.34%
-  cost_usd             1.6354 -> 1.2596 USD   +22.98% [simulated->simulated]
-  energy_kwh           0.2111 -> 0.2008 kWh    +4.89% [simulated->simulated]
-  latency_ms           1.2081 -> 5.2472 ms   -334.35% [simulated->simulated]
-  throughput_samples_s 827.7747 -> 495.5012  -40.14% [simulated->simulated]
+Scenario B: REGRESSED  overall -83.20%   analysis=deterministic_fallback
+  cost_usd             1.6317 -> 1.2777 USD   +21.69% [simulated->simulated]
+  energy_kwh           0.2106 -> 0.2037 kWh    +3.30% [simulated->simulated]
+  latency_ms           1.2052 -> 5.3241 ms   -341.76% [simulated->simulated]
+  throughput_samples_s 829.7426 -> 488.3444  -41.15% [simulated->simulated]
   provider launches=1, retries=0, cleanup events=1
 ```
 
 Exact percentages vary slightly between runs because each demo creates new workflow IDs, which
 seed deterministic simulator jitter. The direction is asserted by the demo. **No real cloud
-workload ran and no money was spent.**
+workload ran.** The demo itself spends no cloud money; the separate Gemma verification used a
+temporary JarvisLabs L4, destroyed afterward.
 
 Logs: `.data/logs/demo-api.*.log`, `demo-worker.*.log`, `demo-temporal.*.log`.
 
@@ -397,10 +398,18 @@ It never invents model output:
 - Provider unreachable -> `gemma.status = "error"`, `payload = null`, safe reason only.
 - Provider available -> `gemma.status = "available"` plus its payload.
 
-**Final verification note:** no hosted key and no local Gemma model were available in this
-environment. The comparison command was verified in both the `unavailable` and `error` paths. No
-real Gemma output is claimed in this README. Even when Gemma is available, the deterministic
-optimizer and policy validator remain authoritative.
+**Verified run (2026-10-25):** real Gemma inference was verified against a JarvisLabs L4
+instance (1x L4, 24 GB, `IN2`) running Ollama 0.40.11 and `gemma4:e2b` over an SSH tunnel.
+`/api/health` reported `gemma connected` with provenance `measured`, and
+`uv run wattson-gemma-compare` returned `gemma.status = "available"` with a schema-validated
+payload. The end-to-end demo used `gemma:ollama:gemma4:e2b` for Scenario A's analysis and for
+both report narratives. Scenario B's analysis safely fell back to deterministic output because
+the model emitted a malformed `proposed_tweak`; schema validation and the policy fallback worked
+as designed. The GPU instance was destroyed after verification to stop billing. Gemma remains
+optional and untrusted; the deterministic optimizer and policy validator stay authoritative.
+
+> Ollama note: the provider sends `think: false` and reserves 1800 output tokens. Without that,
+> Gemma 4 can spend the whole budget on hidden reasoning and return a truncated JSON stub.
 
 ---
 
@@ -413,7 +422,7 @@ optimizer and policy validator remain authoritative.
 - Never contacts a cloud and never spends money.
 - Cleanup is idempotent.
 
-### JarvisLabs (optional, paid, not live-verified)
+### JarvisLabs (optional, paid; adapter not live-verified)
 
 Implemented against the documented `jarvislabs` Python SDK 0.2.x:
 
@@ -426,7 +435,8 @@ Implemented against the documented `jarvislabs` Python SDK 0.2.x:
 **Important limitation:** the documented SDK exposes instance lifecycle but no verified arbitrary
 job-run + per-job metrics API. WATTSON therefore implements provision and cleanup but deliberately
 raises on `collect` rather than fabricating measurements. A fully live paid run is not claimed to
-work end to end. Contract tests are mocked; no paid call was made.
+work end to end. Contract tests are mocked. The live JarvisLabs verification on 2026-10-25 used the
+API only to host Ollama/Gemma; it did not exercise this adapter's provision/collect path.
 
 ### Kepler (optional)
 
@@ -447,7 +457,7 @@ Verified on **2026-10-25** in this repository.
 
 ```text
 $ uv run pytest -q
-57 passed, 1 warning in 16.04s
+57 passed, 1 warning in 9.23s
 
 $ uv run ruff check backend tests
 All checks passed!
@@ -486,14 +496,28 @@ deprecation notice because Next.js 16 removes it; the current Next.js 15 lint ru
 
 ### Demo
 
-The final demo run produced:
+The final demo run on 2026-10-25 produced:
 
-- Scenario A: **improved**, overall **+57.83%**, 4/4 metrics available, one provider launch, one
-  activity retry, one cleanup.
-- Scenario B: **regressed**, overall **-80.34%**, 4/4 metrics available, one provider launch, zero
-  retries, one cleanup.
+- Scenario A: **improved**, overall **+58.49%**, 4/4 metrics available, one provider launch, one
+  activity retry, one cleanup. Analysis source: `gemma` (`ollama`, `gemma4:e2b`).
+- Scenario B: **regressed**, overall **-83.20%**, 4/4 metrics available, one provider launch, zero
+  retries, one cleanup. Analysis source: `deterministic_fallback` because the model emitted a
+  malformed `proposed_tweak`; the report narrative was still Gemma-authored.
 - All metric provenance: `simulated`.
-- No real cloud resource and no spend.
+- No real cloud workload ran. The only paid resource was the temporary JarvisLabs L4 used to host
+  Gemma; it was destroyed after verification.
+
+### Gemma on JarvisLabs
+
+- Instance: 1x L4 (24 GB), `IN2`, Ollama 0.40.11, `gemma4:e2b`; the backend reached Ollama through
+  an SSH tunnel.
+- Health: `gemma connected`, provenance `measured`.
+- `uv run wattson-gemma-compare`: `status=available` with a schema-validated payload.
+- Demo: Scenario A analysis and both report narratives came from
+  `gemma:ollama:gemma4:e2b`. Scenario B's malformed model tweak was rejected; deterministic
+  fallback kept the plan safe.
+- No WATTSON JarvisLabs execution/collect path was exercised. The instance was destroyed after
+  verification.
 
 ### Dashboard actions
 
@@ -510,16 +534,18 @@ This was a manual smoke test, not an automated browser test.
 ### Docker
 
 The Compose files pass `docker compose config` validation for both the default SQLite stack and the
-PostgreSQL override. **Docker image builds/runtime were not verified in this environment**;
-treat the container path as unverified until you run it locally.
+PostgreSQL override. The backend image `wattson-backend:latest` built successfully on 2026-10-25
+(453 MB). The full Compose stack, frontend image, and container runtime were not verified in this
+environment; treat the container path as partly unverified until you run it locally.
 
 ### Not verified
 
-- Real Gemma inference (no key/model available).
-- Live JarvisLabs API calls or paid execution.
+- WATTSON's live JarvisLabs execution/collect path and paid workload runs (JarvisLabs was used only
+  to host Ollama/Gemma for the verification above).
+- Hosted Gemma endpoint (only Ollama-hosted Gemma was verified).
 - Live Kepler/Prometheus scraping.
 - Production PostgreSQL deployment (migration and driver are present).
-- Docker image build/runtime.
+- Full Docker Compose runtime and frontend image (the backend image builds successfully).
 
 ---
 

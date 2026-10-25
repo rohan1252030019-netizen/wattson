@@ -112,7 +112,11 @@ class OllamaGemma(ModelProvider):
                     ],
                     "stream": False,
                     "format": "json",
-                    "options": {"temperature": 0.1, "num_predict": 900},
+                    # Gemma 4 may spend the whole output budget on hidden thinking
+                    # tokens and return a truncated JSON stub. Structured output
+                    # needs the full budget for the JSON body itself.
+                    "think": False,
+                    "options": {"temperature": 0.1, "num_predict": 1800},
                 },
                 timeout=60.0,
             )
